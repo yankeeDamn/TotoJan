@@ -1,0 +1,149 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ServiceType {
+  travel
+  transport
+  delivery
+}
+
+enum VehicleType {
+  TOTO
+}
+
+enum OrderStatus {
+  pending
+  assigned
+  accepted
+  arriving
+  in_progress
+  completed
+  cancelled
+}
+
+enum PaymentMode {
+  cash
+  upi
+}
+
+enum PaymentStatus {
+  pending
+  paid
+  failed
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  DISPATCHER
+}
+
+model Customer {
+  id        String   @id @default(cuid())
+  name      String
+  phone     String   @unique
+  orders    Order[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Driver {
+  id            String      @id @default(cuid())
+  name          String
+  phone         String      @unique
+  passwordHash  String
+  vehicleType   VehicleType @default(TOTO)
+  vehicleNumber String      @unique
+  isOnline      Boolean     @default(false)
+  isVerified    Boolean     @default(true)
+  currentLat    Float?
+  currentLng    Float?
+  orders        Order[]
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+model Order {
+  id             String           @id @default(cuid())
+  orderNumber    String           @unique
+  customerId     String
+  customer       Customer         @relation(fields: [customerId], references: [id])
+  serviceType    ServiceType
+  pickupLocality String
+  pickupAddress  String
+  dropLocality   String
+  dropAddress    String
+  pickupLat      Float?
+  pickupLng      Float?
+  dropLat        Float?
+  dropLng        Float?
+  goodsDetails   String?
+  specialNote    String?
+  estimatedFare  Decimal          @db.Decimal(10, 2)
+  finalFare      Decimal?         @db.Decimal(10, 2)
+  status         OrderStatus      @default(pending)
+  paymentMode    PaymentMode      @default(cash)
+  paymentStatus  PaymentStatus    @default(pending)
+  driverId       String?
+  driver         Driver?          @relation(fields: [driverId], references: [id])
+  scheduledAt    DateTime?
+  priority       Boolean          @default(false)
+  statusLogs     OrderStatusLog[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([status, createdAt])
+  @@index([driverId, status])
+}
+
+model FareRule {
+  id                 String      @id @default(cuid())
+  serviceType        ServiceType @unique
+  baseFare           Decimal     @db.Decimal(10, 2)
+  shortDistanceFare  Decimal     @db.Decimal(10, 2)
+  mediumDistanceFare Decimal     @db.Decimal(10, 2)
+  longDistanceFare   Decimal     @db.Decimal(10, 2)
+  priorityCharge     Decimal     @db.Decimal(10, 2)
+  waitingCharge      Decimal     @db.Decimal(10, 2)
+  isActive           Boolean     @default(true)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+}
+
+model ServiceArea {
+  id        String   @id @default(cuid())
+  areaName  String
+  cityName  String
+  latitude  Float?
+  longitude Float?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([areaName, cityName])
+}
+
+model OrderStatusLog {
+  id        String      @id @default(cuid())
+  orderId   String
+  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  status    OrderStatus
+  note      String?
+  changedBy String
+  createdAt DateTime    @default(now())
+}
+
+model AdminUser {
+  id           String    @id @default(cuid())
+  name         String
+  email        String    @unique
+  passwordHash String
+  role         AdminRole @default(DISPATCHER)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
