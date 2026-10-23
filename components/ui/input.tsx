@@ -1,19 +1,25 @@
 import * as React from "react";
-
 import { cn } from "@/lib/utils";
 
-export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(function Input(
-  { className, ...props },
-  ref,
-) {
-  return (
+const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
+  ({ className, type, ...props }, ref) => (
     <input
+      type={type}
       ref={ref}
       className={cn(
-        "h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-ink shadow-sm outline-none transition placeholder:text-slate-400 focus:border-brand-300 focus:ring-4 focus:ring-brand-100",
+        "flex h-12 w-full rounded-lg border-2 border-input bg-card px-4 text-base placeholder:text-muted-foreground focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
       {...props}
     />
-  );
-});
+  ),
+);
+Input.displayName = "Input";
+
+const Label = React.forwardRef<HTMLLabelElement, React.LabelHTMLAttributes<HTMLLabelElement>>(({ className, ...props }, ref) => (
+  // eslint-disable-next-line jsx-a11y/label-has-associated-control
+  <label ref={ref} className={cn("mb-1.5 block text-sm font-semibold", className)} {...props} />
+));
+Label.displayName = "Label";
+
+export { Input, Label };
