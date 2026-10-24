@@ -1,189 +1,94 @@
-# Rampurhat TOTO
+# TotoJan
 
-Hyperlocal TOTO booking platform for passenger travel, market transport, and parcel delivery inside **Rampurhat, West Bengal**.
+Hyper-local Toto and cab booking for the **Rampurhat ⇄ Tarapith** road (West Bengal, India). Travelers book live or in advance, see the fare before they confirm, and chat or call the driver. Drivers go online, accept requests against a countdown, and track earnings.
 
-Built with **Next.js 15 App Router**, **TypeScript**, **Tailwind CSS**, **PostgreSQL**, and **Prisma ORM**.
+**Stack:** Next.js 15 (App Router, TypeScript) · Tailwind CSS with shadcn-style components · Supabase (Auth, Postgres + RLS, Realtime) · Leaflet + OpenStreetMap · Lucide icons.
 
----
-
-## Architecture overview
-
-```
-app/
-  page.tsx                  ← Customer landing + booking form
-  booking/
-    confirm/page.tsx        ← Booking confirmation screen
-    [orderId]/page.tsx      ← Order tracking detail page
-  track/page.tsx            ← Quick-track form by order ID
-  admin/                    ← Protected admin panel
-    login/                  ← Admin authentication
-    dashboard/              ← Summary cards + recent orders
-    orders/                 ← Order table, driver assign, status update
-    drivers/                ← Driver list + create driver
-    fares/                  ← Distance-band fare config per service type
-    settings/               ← Service area localities viewer
-    analytics/              ← Revenue and order breakdown charts
-  driver/                   ← Protected driver panel
-    login/                  ← Driver authentication
-    dashboard/              ← Assigned jobs + accept/reject + status flow
-  api/
-    bookings/               ← POST create booking, GET by id
-    orders/                 ← List, assign driver, update status
-    drivers/                ← CRUD + availability toggle
-    fare-estimate/          ← POST fare calculation
-    fares/                  ← GET/PUT fare rules
-    service-area/validate/  ← POST Rampurhat locality check
-    auth/admin/login        ← Admin JWT login
-    auth/driver/login       ← Driver JWT login
-    auth/logout             ← Clear both session cookies
-    admin/me                ← Current admin session info
-    admin/summary           ← Dashboard summary counts
-    driver/me               ← Current driver dashboard data
-
-components/customer/        ← Booking form, timeline, track form
-components/admin/           ← Orders table, drivers manager, fare form, login form
-components/driver/          ← Driver dashboard client, login form
-components/ui/              ← Badge, Button, Card, Input, Select, Textarea, EmptyState
-
-lib/                        ← auth (JWT/cookies), db (Prisma singleton), env,
-                               fare (Haversine + band calc), service-area (locality lookup),
-                               utils, validations (Zod schemas)
-
-services/order-service.ts   ← All Prisma data access functions
-
-prisma/
-  schema.prisma             ← Customer, Driver, Order, FareRule, ServiceArea,
-                               OrderStatusLog, AdminUser
-  seed.ts                   ← Admin, 3 drivers, 3 fare rules, 12 Rampurhat localities,
-                               1 sample order
-
-constants/rampurhat.ts      ← Localities, city name, service copy, distance bands
-types/index.ts              ← Shared domain types
-```
-
----
-
-## Getting started
-
-### 1. Prerequisites
-
-- Node.js 20+
-- PostgreSQL 15+ (local or Supabase/Neon/Railway)
-- `pnpm` or `npm`
-
-### 2. Clone and install
+## Quick start
 
 ```bash
-git clone https://github.com/your-org/rampurhat-toto.git
-cd rampurhat-toto
 npm install
+cp .env.example .env.local     # add your Supabase URL + anon key
 ```
 
-### 3. Environment variables
+### 1. Database
 
-Copy the example file and fill in your values:
+Create a Supabase project, then either:
 
-```bash
-cp .env.example .env
-```
+- **CLI:** `supabase link --project-ref <ref> && supabase db push`, or
+- **SQL editor:** paste [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql) and run it.
 
-```env
-DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/rampurhat_toto"
-AUTH_SECRET="your-32-char-secret-here"
-APP_URL="http://localhost:3000"
-```
+For local development with the Supabase CLI, `supabase start` followed by `supabase db reset` applies the migration **and** [`supabase/seed.sql`](supabase/seed.sql). The seed is local-only (it creates users with a known password):
 
-> `AUTH_SECRET` must be at least 32 characters. Generate one with:
-> `openssl rand -base64 32`
+| Account | Role | Password |
+|---|---|---|
+| `traveler@totojan.test` | Traveler | `Password@123` |
+| `driver1@totojan.test` | Driver (Toto, online) | `Password@123` |
+| `driver2@totojan.test` | Driver (Cab, offline) | `Password@123` |
 
-### 4. Set up the database
+### 2. Auth settings
 
-```bash
-# Push schema and generate Prisma client
-npx prisma migrate dev --name init
+In Supabase → Authentication → Providers → Email, turn **Confirm email** off while developing, otherwise new accounts see a "check your email" screen first.
 
-# Seed with admin, drivers, fare rules, and Rampurhat localities
-npx prisma db seed
-```
-
-### 5. Run the dev server
+### 3. Run
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+## How it works
 
----
+| Area | Where |
+|---|---|
+| Landing page, Traveler/Driver mode toggle | `app/page.tsx`, `components/auth-form.tsx` |
+| Booking (preset routes, Ride Now / Book for Later, fare breakdown, map) | `components/booking-form.tsx` |
+| Pricing engine | `lib/pricing.ts` |
+| Ride creation (server-side fare) | `app/api/rides/route.ts` |
+| Driver dashboard (online toggle, countdown requests, earnings) | `components/driver-dashboard.tsx` |
+| Ride tracking + status flow | `components/ride-view.tsx` |
+| Realtime chat + `tel:` call button | `components/chat-panel.tsx`, `components/ride-view.tsx` |
+| Schema, RLS, RPCs, realtime publication | `supabase/migrations/0001_init.sql` |
 
-## Default seed credentials
+### Dynamic pricing
 
-| Role    | Email / Phone        | Password    |
-|---------|---------------------|-------------|
-| Admin   | admin@rampurhattoto.in | Admin@123 |
-| Driver  | +919000011111        | Driver@123  |
-| Driver  | +919000022222        | Driver@123  |
-| Driver  | +919000033333        | Driver@123  |
+`fare = round to ₹5 of (max(min fare, base + per-km × distance) × multiplier)`. The multiplier is the product of the active factors, **capped at 2×**:
 
----
+- Amavasya (approximated from the mean lunar cycle, with a ±1 day window) or a festival day from `FESTIVAL_DAYS`: ×1.30 / ×1.35
+- Late night (10 pm – 5 am IST): ×1.25. Peak hours (5–9 am, 5–8 pm): ×1.10
+- Weekend: ×1.05
+- Live demand: when open requests outnumber online drivers, up to ×1.40
 
-## Application routes
+Rates live in `RATES` at the top of `lib/pricing.ts`. Add festival dates to `FESTIVAL_DAYS` (Kali Puja 2026 is already there).
 
-| URL | Description |
-|-----|-------------|
-| `/` | Customer landing page with booking form |
-| `/booking/confirm?orderId=RHT-...` | Post-booking confirmation screen |
-| `/booking/[orderId]` | Live order tracking page |
-| `/track` | Quick-track by order ID |
-| `/admin/login` | Admin login |
-| `/admin/dashboard` | Ops summary |
-| `/admin/orders` | Order management + driver assignment |
-| `/admin/drivers` | Driver registry |
-| `/admin/fares` | Fare rule editor |
-| `/admin/settings` | Service area localities |
-| `/admin/analytics` | Revenue + breakdown |
-| `/driver/login` | Driver login |
-| `/driver/dashboard` | Driver job view |
+### Matching and ride lifecycle
 
----
+Rides move `pending → accepted → ongoing → completed` (or `cancelled`). Clients cannot update rides directly; every transition goes through two Postgres functions:
 
-## Key business rules
+- `accept_ride` claims a ride with a single guarded `UPDATE`, so if two drivers tap Accept at once exactly one wins.
+- `set_ride_status` enforces who may start, complete or cancel. A driver cancelling an accepted ride releases it back to `pending` for re-dispatch.
 
-- **Rampurhat-only**: All bookings validate pickup and drop against a list of 12 Rampurhat localities. Orders with unrecognised areas are rejected at API level before the database is touched.
-- **Three service types**: `travel`, `transport`, `delivery` — each with independent fare rules.
-- **Fare bands**: Haversine distance → short (≤2.5 km), medium (≤5 km), long (>5 km). Optional priority surcharge.
-- **Status flow**: `pending → assigned → accepted → arriving → in_progress → completed` (cancellation allowed at any step).
-- **Payment**: Cash or UPI, collected after trip completion. No online gateway in MVP.
-- **Auth**: JWT stored in `httpOnly` cookies. Admin and driver sessions are independent. Driver can only toggle their own availability.
+All online drivers with a matching vehicle type see new requests in real time (the corridor is one route, so there is no geo-filtering yet). Each live request has a 30-second on-screen countdown per driver.
 
----
+### Security notes
 
-## Available scripts
+- Row Level Security is enabled on all four tables. Travelers see only their rides; drivers see their own rides plus open requests; chat is limited to the two people on a ride; a driver's phone number is only visible to the traveler on the same ride, and vice versa.
+- Users cannot change their own `role`.
+- The fare is computed on the server in `/api/rides`. The `rides` INSERT policy still lets a traveler insert directly with the anon key, so a determined user could write a lower fare; if that matters, move ride creation behind a `security definer` function that computes the fare in SQL.
+
+## Known limitations / next steps
+
+- **Coordinates and distance are approximate** (`lib/routes.ts`): the map draws a guide line, not the road, and every ride uses the same corridor distance. Custom pickup/drop text is passed to the driver as-is. Add geocoding and routing (e.g. OSRM) for true per-trip distance.
+- **One vehicle per driver** (unique index in the migration). Drop `vehicles_one_per_driver` to support fleets.
+- **Payments are cash/UPI to the driver**, outside the app.
+- No push/SMS notifications yet: drivers see requests while the dashboard is open.
+- Amavasya detection is approximate; confirm dates against a panchang and add any that matter to `FESTIVAL_DAYS`.
+- Not yet verified against a live Supabase project: the app builds, typechecks and lints, but the SQL and realtime flows have not been run end to end.
+
+## Scripts
 
 ```bash
-npm run dev           # Start dev server (Turbopack)
-npm run build         # Production build
-npm run lint          # ESLint
-npm run prisma:generate  # Regenerate Prisma client
-npm run prisma:migrate   # Run migrations
-npm run prisma:seed      # Seed database
+npm run dev        # dev server
+npm run build      # production build
+npm run typecheck  # tsc --noEmit
+npm run lint       # next lint
 ```
-
----
-
-## Extending the MVP
-
-| Feature | Where to add |
-|---------|-------------|
-| SMS/WhatsApp notification on assign | `services/order-service.ts → assignDriver()` |
-| Google Maps locality autocomplete | Replace `Select` locality dropdown in `BookingForm` |
-| Driver GPS tracking | Extend `Driver` model, new `/api/drivers/[id]/location` route |
-| UPI payment deeplink | Add at `/booking/[orderId]` once status is `completed` |
-| New service area | Add entries to `RAMPURHAT_LOCALITIES` in `constants/rampurhat.ts`, re-seed |
-| Multi-city expansion | Remove single-city lock in `validateRampurhatServiceArea()` |
-
-Rampurhat TOTO is a mobile-first hyperlocal booking MVP for TOTO rides, goods transport, and parcel delivery inside Rampurhat.
-
-The repository is scaffolded with Next.js App Router, TypeScript, Tailwind CSS, PostgreSQL, and Prisma.
-
-Further setup, features, and run instructions are documented as the app implementation is completed.

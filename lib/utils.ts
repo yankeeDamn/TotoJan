@@ -1,61 +1,52 @@
 import { clsx, type ClassValue } from "clsx";
-import { format } from "date-fns";
 import { twMerge } from "tailwind-merge";
-
-import type { BookingStatus, ServiceType } from "@/types";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatCurrency(value: number) {
+export function formatINR(amount: number) {
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
     maximumFractionDigits: 0,
-  }).format(value);
+  }).format(amount);
 }
 
-export function formatDateTime(value: Date | string | null | undefined) {
-  if (!value) {
-    return "Not scheduled";
-  }
+const IST = "Asia/Kolkata";
 
-  return format(new Date(value), "dd MMM yyyy, hh:mm a");
+export function formatDateTime(iso: string) {
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: IST,
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(new Date(iso));
 }
 
-export function createOrderNumber() {
-  return `RHT-${Date.now().toString().slice(-6)}`;
+export function formatTime(iso: string) {
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: IST,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(new Date(iso));
 }
 
-export function getStatusTone(status: BookingStatus) {
-  switch (status) {
-    case "completed":
-      return "bg-accent-100 text-accent-800 border-accent-200";
-    case "cancelled":
-      return "bg-rose-100 text-rose-700 border-rose-200";
-    case "pending":
-      return "bg-amber-100 text-amber-800 border-amber-200";
-    default:
-      return "bg-slate-100 text-slate-700 border-slate-200";
-  }
+/** Accepts "98765 43210", "+91 98765-43210", "09876543210" and returns "+919876543210" (or null). */
+export function normalizeIndianPhone(input: string): string | null {
+  const digits = input.replace(/\D/g, "");
+  const ten = digits.length === 12 && digits.startsWith("91") ? digits.slice(2) : digits.length === 11 && digits.startsWith("0") ? digits.slice(1) : digits;
+  return /^[6-9]\d{9}$/.test(ten) ? `+91${ten}` : null;
 }
 
-export function getServiceLabel(serviceType: ServiceType) {
-  switch (serviceType) {
-    case "travel":
-      return "Passenger travel";
-    case "transport":
-      return "Market transport";
-    case "delivery":
-      return "Parcel delivery";
-  }
+/** Value for <input type="datetime-local"> in the user's local time. */
+export function toLocalInputValue(date: Date) {
+  const offsetMs = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
 }
 
-export function decimalToNumber(value: { toNumber(): number } | number | null | undefined) {
-  if (value == null) {
-    return null;
-  }
-
-  return typeof value === "number" ? value : value.toNumber();
-}
+export const SUPPORT_PHONE = process.env.NEXT_PUBLIC_SUPPORT_PHONE || "";
+export const EMERGENCY_PHONE = "112"; // India's unified emergency number
