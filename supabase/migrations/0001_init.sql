@@ -266,7 +266,8 @@ declare
   v_ride public.rides;
 begin
   select * into v_ride from public.rides where id = p_ride for update;
-  if not found then
+  -- Strangers get the same answer as for a ride that does not exist.
+  if not found or v_uid not in (v_ride.traveler_id, coalesce(v_ride.driver_id, v_ride.traveler_id)) then
     raise exception 'Ride not found';
   end if;
 

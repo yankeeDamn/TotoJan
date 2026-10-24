@@ -14,10 +14,8 @@ export default async function LoginPage({
 }) {
   const { role, next } = await searchParams;
 
-  if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
-    const profile = await getProfile();
-    if (profile) redirect(homeFor(profile.role));
-  }
+  const profile = await getProfile();
+  if (profile) redirect(homeFor(profile.role));
 
   return (
     <>

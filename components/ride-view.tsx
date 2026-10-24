@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeft, CalendarClock, Check, Clock, Loader2, Phone, XCircle } from "lucide-react";
+import { ArrowLeft, CalendarClock, Check, Clock, Loader2, Navigation, Phone, RotateCw, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChatPanel } from "@/components/chat-panel";
@@ -39,6 +40,7 @@ function mapRoute(ride: Ride) {
 }
 
 export function RideView({ initialRide, initialMessages, me }: RideViewProps) {
+  const router = useRouter();
   const [ride, setRide] = useState<Ride>(initialRide);
   const [counterpart, setCounterpart] = useState<Counterpart | null>(null);
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
@@ -81,6 +83,14 @@ export function RideView({ initialRide, initialMessages, me }: RideViewProps) {
       toast.warning(isTraveler ? "Your driver had to cancel. Finding you another one…" : "Ride released.");
     }
   }, [ride.status, isTraveler]);
+
+  // A driver who released the ride (or lost it) has nothing left to do here.
+  useEffect(() => {
+    if (!isTraveler && ride.driver_id !== me.id) {
+      toast.info("This ride is no longer assigned to you.");
+      router.replace("/driver");
+    }
+  }, [isTraveler, ride.driver_id, me.id, router]);
 
   // Load the other person's contact details whenever the pairing changes.
   useEffect(() => {
@@ -151,6 +161,7 @@ export function RideView({ initialRide, initialMessages, me }: RideViewProps) {
                 {ride.pickup_location} → {ride.drop_location}
               </CardTitle>
               <p className="mt-1 flex flex-wrap items-center gap-x-3 text-sm text-muted-foreground">
+                <span className="font-mono text-xs uppercase">#{ride.id.slice(0, 6)}</span>
                 {scheduled && ride.scheduled_for ? (
                   <span className="inline-flex items-center gap-1">
                     <CalendarClock className="size-4" aria-hidden /> {formatDateTime(ride.scheduled_for)}
@@ -229,9 +240,34 @@ export function RideView({ initialRide, initialMessages, me }: RideViewProps) {
             )}
 
             <div className="grid gap-2">
+              {!isTraveler && (ride.status === "accepted" || ride.status === "ongoing") && (
+                <Button asChild variant="outline">
+                  <a
+                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                      `${ride.status === "accepted" ? ride.pickup_location : ride.drop_location}, West Bengal, India`,
+                    )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <Navigation /> Navigate to {ride.status === "accepted" ? "pickup" : "drop"}
+                  </a>
+                </Button>
+              )}
               {!isTraveler && ride.status === "accepted" && (
                 <Button size="lg" variant="accent" loading={busy} onClick={() => changeStatus("ongoing")}>
                   Start trip
+                </Button>
+              )}
+              {isTraveler && (ride.status === "completed" || ride.status === "cancelled") && (
+                <Button asChild size="lg">
+                  <Link
+                    href={{
+                      pathname: "/traveler",
+                      query: { pickup: ride.pickup_location, drop: ride.drop_location, vehicle: ride.vehicle_type },
+                    }}
+                  >
+                    <RotateCw /> Book again
+                  </Link>
                 </Button>
               )}
               {!isTraveler && ride.status === "ongoing" && (

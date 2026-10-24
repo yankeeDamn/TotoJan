@@ -10,10 +10,8 @@ export const metadata: Metadata = { title: "Sign up" };
 export default async function SignupPage({ searchParams }: { searchParams: Promise<{ role?: string }> }) {
   const { role } = await searchParams;
 
-  if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
-    const profile = await getProfile();
-    if (profile) redirect(homeFor(profile.role));
-  }
+  const profile = await getProfile();
+  if (profile) redirect(homeFor(profile.role));
 
   return (
     <>

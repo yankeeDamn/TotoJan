@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HelpSheet } from "@/components/help-sheet";
+import { PublicNav } from "@/components/public-nav";
 import { SignOutButton } from "@/components/sign-out-button";
 import { homeFor } from "@/lib/auth";
 import type { Profile } from "@/lib/types";
@@ -40,14 +41,7 @@ export function SiteHeader({ profile }: { profile?: Profile | null }) {
               <SignOutButton />
             </>
           ) : (
-            <>
-              <Button asChild variant="ghost" size="sm">
-                <Link href="/login">Log in</Link>
-              </Button>
-              <Button asChild size="sm">
-                <Link href="/signup">Sign up</Link>
-              </Button>
-            </>
+            <PublicNav />
           )}
         </nav>
       </div>

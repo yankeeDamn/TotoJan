@@ -82,7 +82,18 @@ All online drivers with a matching vehicle type see new requests in real time (t
 - **Payments are cash/UPI to the driver**, outside the app.
 - No push/SMS notifications yet: drivers see requests while the dashboard is open.
 - Amavasya detection is approximate; confirm dates against a panchang and add any that matter to `FESTIVAL_DAYS`.
-- Not yet verified against a live Supabase project: the app builds, typechecks and lints, but the SQL and realtime flows have not been run end to end.
+- **Verified:** the schema, RLS policies and ride RPCs pass `npm run test:db` (59 checks on an in-process Postgres with stubbed Supabase auth). **Not yet verified:** the browser flows and Supabase Realtime against a live project; do the manual checklist below.
+- Realtime only reaches a driver while a ride is visible to them, so when another driver accepts a request it vanishes from your list on the next 10-second refresh, not instantly. Accepting a taken ride fails safely with a clear message.
+
+## Manual test checklist (two browsers or one normal + one private window)
+
+1. Sign up a traveler and a driver (driver: add a vehicle). Log in on each.
+2. Driver: tap **Go online**. Traveler: book **Ride Now**; the driver should see the request with a 30s countdown.
+3. Driver: **Accept**. Traveler's ride page should flip to "Driver on the way" with the driver's name, vehicle and a call button.
+4. Exchange chat messages both ways; confirm they arrive without refreshing.
+5. Driver: **Start trip**, then **Complete trip**. Check Today/Total earnings and Recent trips.
+6. Repeat with a second driver online to confirm only one can accept; also try **Book for Later**, driver release, and traveler cancel.
+7. On a phone: check the sticky booking bar, tap targets, SOS sheet, and dark mode.
 
 ## Scripts
 
@@ -91,4 +102,5 @@ npm run dev        # dev server
 npm run build      # production build
 npm run typecheck  # tsc --noEmit
 npm run lint       # next lint
+npm run test:db    # RLS + RPC tests against the migration (no Supabase needed)
 ```

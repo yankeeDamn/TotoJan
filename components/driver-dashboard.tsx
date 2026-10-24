@@ -4,7 +4,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowRight, CalendarClock, CarTaxiFront, IndianRupee, Navigation, Power, Timer, Wallet, Zap } from "lucide-react";
+import {
+  ArrowRight,
+  CalendarClock,
+  CarTaxiFront,
+  CheckCircle2,
+  Clock,
+  IndianRupee,
+  Navigation,
+  Power,
+  Timer,
+  Wallet,
+  Zap,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
@@ -14,13 +26,26 @@ import { createClient } from "@/lib/supabase/client";
 import { cn, formatDateTime, formatINR } from "@/lib/utils";
 import type { Profile, Ride, Vehicle, VehicleType } from "@/lib/types";
 
-/** Seconds a driver has to accept a live request before it drops off their screen. */
+/** Seconds a driver has to accept a live request before it moves to "Still open". */
 const REQUEST_SECONDS = 30;
+/**
+ * Realtime only reaches a driver while a ride is visible to them. When another driver accepts a
+ * request it disappears from our view without an event, so we also poll on a short interval.
+ */
+const POLL_MS = 10_000;
 
 const istDay = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(d);
 
 const navigateUrl = (place: string) =>
   `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${place}, West Bengal, India`)}`;
+
+interface CompletedTrip {
+  id: string;
+  pickup_location: string;
+  drop_location: string;
+  fare: number;
+  updated_at: string;
+}
 
 interface Props {
   profile: Profile;
@@ -32,7 +57,7 @@ export function DriverDashboard({ profile, initialVehicle }: Props) {
   const [vehicle, setVehicle] = useState<Vehicle | null>(initialVehicle);
   const [open, setOpen] = useState<Ride[]>([]);
   const [active, setActive] = useState<Ride[]>([]);
-  const [earnings, setEarnings] = useState({ today: 0, total: 0, trips: 0 });
+  const [trips, setTrips] = useState<CompletedTrip[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
@@ -55,14 +80,19 @@ export function DriverDashboard({ profile, initialVehicle }: Props) {
         .eq("driver_id", profile.id)
         .in("status", ["accepted", "ongoing"])
         .order("created_at", { ascending: true }),
-      supabase.from("rides").select("fare, updated_at").eq("driver_id", profile.id).eq("status", "completed"),
+      supabase
+        .from("rides")
+        .select("id, pickup_location, drop_location, fare, updated_at")
+        .eq("driver_id", profile.id)
+        .eq("status", "completed")
+        .order("updated_at", { ascending: false }),
     ]);
 
     const openRides = ((openRes.data as Ride[] | null) ?? []).filter(
       (r) => !vehicle || r.vehicle_type === vehicle.vehicle_type,
     );
 
-    // Announce requests that arrived since the last refresh (not the first load).
+    // Announce requests that arrived since the last refresh (never on the first load).
     const ids = new Set(openRides.map((r) => r.id));
     if (knownIds.current && vehicle?.is_active) {
       const fresh = openRides.filter((r) => !knownIds.current!.has(r.id));
@@ -71,23 +101,17 @@ export function DriverDashboard({ profile, initialVehicle }: Props) {
           description: `${r.pickup_location} → ${r.drop_location} · ${formatINR(Number(r.fare))}`,
         });
       }
+      if (fresh.some((r) => r.booking_type === "live")) navigator.vibrate?.([200, 100, 200]);
     }
     knownIds.current = ids;
 
     setOpen(openRides);
     setActive((activeRes.data as Ride[] | null) ?? []);
-
-    const done = (doneRes.data as { fare: number; updated_at: string }[] | null) ?? [];
-    const today = istDay(new Date());
-    setEarnings({
-      trips: done.length,
-      total: done.reduce((s, r) => s + Number(r.fare), 0),
-      today: done.filter((r) => istDay(new Date(r.updated_at)) === today).reduce((s, r) => s + Number(r.fare), 0),
-    });
+    setTrips((doneRes.data as CompletedTrip[] | null) ?? []);
     setLoaded(true);
   }, [profile.id, vehicle]);
 
-  // Realtime: any change to a ride this driver can see triggers a refresh. A slow poll is the safety net.
+  // Realtime: any change to a ride this driver can see triggers a refresh. Polling covers the rest.
   useEffect(() => {
     refresh();
     const supabase = createClient();
@@ -96,16 +120,21 @@ export function DriverDashboard({ profile, initialVehicle }: Props) {
       clearTimeout(timer);
       timer = setTimeout(refresh, 250);
     };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
 
     const channel = supabase
       .channel("driver-rides")
       .on("postgres_changes", { event: "*", schema: "public", table: "rides" }, debounced)
       .subscribe();
-    const poll = setInterval(refresh, 45_000);
+    const poll = setInterval(refresh, POLL_MS);
+    document.addEventListener("visibilitychange", onVisible);
 
     return () => {
       clearTimeout(timer);
       clearInterval(poll);
+      document.removeEventListener("visibilitychange", onVisible);
       supabase.removeChannel(channel);
     };
   }, [refresh]);
@@ -114,6 +143,7 @@ export function DriverDashboard({ profile, initialVehicle }: Props) {
   const hasLive = online && open.some((r) => r.booking_type === "live");
   useEffect(() => {
     if (!hasLive) return;
+    setNow(Date.now()); // don't start from a stale timestamp after a long idle spell
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, [hasLive]);
@@ -155,39 +185,59 @@ export function DriverDashboard({ profile, initialVehicle }: Props) {
     return <VehicleSetup onSaved={setVehicle} />;
   }
 
-  // Start the countdown the first time a live request is on screen while online.
-  const liveRequests = open
+  const today = istDay(new Date());
+  const earnings = {
+    trips: trips.length,
+    total: trips.reduce((s, t) => s + Number(t.fare), 0),
+    today: trips.filter((t) => istDay(new Date(t.updated_at)) === today).reduce((s, t) => s + Number(t.fare), 0),
+  };
+
+  // Split live requests into "counting down" and "timer ended but still open".
+  const live = open
     .filter((r) => r.booking_type === "live" && !declined.has(r.id))
     .map((r) => {
-      if (!seenAt.current.has(r.id)) seenAt.current.set(r.id, Date.now());
-      const elapsed = (now - seenAt.current.get(r.id)!) / 1000;
-      return { ride: r, secondsLeft: Math.max(0, Math.ceil(REQUEST_SECONDS - elapsed)) };
-    })
-    .filter((x) => x.secondsLeft > 0);
-
+      if (!seenAt.current.has(r.id)) seenAt.current.set(r.id, now);
+      const elapsed = Math.max(0, (now - seenAt.current.get(r.id)!) / 1000);
+      return { ride: r, secondsLeft: Math.min(REQUEST_SECONDS, Math.ceil(REQUEST_SECONDS - elapsed)) };
+    });
+  const counting = live.filter((x) => x.secondsLeft > 0);
+  const stillOpen = live.filter((x) => x.secondsLeft <= 0).map((x) => x.ride);
   const advance = open.filter((r) => r.booking_type === "scheduled" && !declined.has(r.id));
 
   return (
     <div className="grid gap-4">
-      <Card className={cn("overflow-hidden", online && "border-accent")}>
-        <CardContent className="flex items-center justify-between gap-4 p-5">
-          <div className="min-w-0">
-            <p className="truncate text-lg font-extrabold">{profile.full_name || "Driver"}</p>
-            <p className="flex items-center gap-1.5 truncate text-sm text-muted-foreground">
-              <VehicleIcon type={vehicle.vehicle_type} className="size-4" />
-              <span className="capitalize">{vehicle.vehicle_type}</span> · {vehicle.vehicle_number}
-            </p>
+      <Card className={cn("overflow-hidden transition-colors", online ? "border-accent" : "border-border")}>
+        <CardContent className="grid gap-4 p-5">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <p className="truncate text-lg font-extrabold">{profile.full_name || "Driver"}</p>
+              <p className="flex items-center gap-1.5 truncate text-sm text-muted-foreground">
+                <VehicleIcon type={vehicle.vehicle_type} className="size-4" />
+                <span className="capitalize">{vehicle.vehicle_type}</span> · {vehicle.vehicle_number}
+                {vehicle.model ? ` · ${vehicle.model}` : ""}
+              </p>
+            </div>
+            <span
+              className={cn(
+                "inline-flex shrink-0 items-center gap-2 rounded-full px-3 py-1 text-xs font-bold",
+                online ? "bg-accent/15 text-accent" : "bg-muted text-muted-foreground",
+              )}
+              role="status"
+            >
+              <span className={cn("size-2 rounded-full", online ? "animate-pulse bg-accent" : "bg-muted-foreground")} aria-hidden />
+              {online ? "Online" : "Offline"}
+            </span>
           </div>
           <Button
             size="lg"
-            variant={online ? "accent" : "outline"}
+            variant={online ? "outline" : "default"}
             loading={toggling}
             onClick={toggleOnline}
             aria-pressed={online}
-            className="shrink-0"
+            className="w-full"
           >
             {!toggling && <Power />}
-            {online ? "Online" : "Go online"}
+            {online ? "Go offline" : "Go online and get requests"}
           </Button>
         </CardContent>
       </Card>
@@ -242,11 +292,11 @@ export function DriverDashboard({ profile, initialVehicle }: Props) {
         {!online ? (
           <EmptyState title="You're offline" text="Go online to start receiving live ride requests." />
         ) : !loaded ? (
-          <p className="text-sm text-muted-foreground">Loading requests…</p>
-        ) : liveRequests.length === 0 ? (
+          <div className="h-28 animate-pulse rounded-2xl bg-muted" aria-label="Loading requests" />
+        ) : counting.length === 0 && stillOpen.length === 0 ? (
           <EmptyState title="Waiting for requests" text="New rides show up here the moment a traveler books." pulse />
         ) : (
-          liveRequests.map(({ ride, secondsLeft }) => (
+          counting.map(({ ride, secondsLeft }) => (
             <RequestCard
               key={ride.id}
               ride={ride}
@@ -258,6 +308,26 @@ export function DriverDashboard({ profile, initialVehicle }: Props) {
           ))
         )}
       </section>
+
+      {online && stillOpen.length > 0 && (
+        <section aria-labelledby="still-open" className="grid gap-3">
+          <div>
+            <h2 id="still-open" className="text-sm font-bold uppercase tracking-wide text-muted-foreground">
+              Still open
+            </h2>
+            <p className="text-xs text-muted-foreground">The timer ended, but nobody has taken these yet.</p>
+          </div>
+          {stillOpen.map((r) => (
+            <RequestCard
+              key={r.id}
+              ride={r}
+              accepting={acceptingId === r.id}
+              onAccept={() => accept(r)}
+              onDecline={() => decline(r.id)}
+            />
+          ))}
+        </section>
+      )}
 
       {online && advance.length > 0 && (
         <section aria-labelledby="advance" className="grid gap-3">
@@ -273,6 +343,32 @@ export function DriverDashboard({ profile, initialVehicle }: Props) {
               onDecline={() => decline(r.id)}
             />
           ))}
+        </section>
+      )}
+
+      {trips.length > 0 && (
+        <section aria-labelledby="recent" className="grid gap-2">
+          <h2 id="recent" className="text-sm font-bold uppercase tracking-wide text-muted-foreground">
+            Recent trips
+          </h2>
+          <Card>
+            <ul className="divide-y">
+              {trips.slice(0, 5).map((t) => (
+                <li key={t.id} className="flex items-center gap-3 p-4">
+                  <CheckCircle2 className="size-5 shrink-0 text-accent" aria-hidden />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold">
+                      {t.pickup_location} → {t.drop_location}
+                    </p>
+                    <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <Clock className="size-3" aria-hidden /> {formatDateTime(t.updated_at)}
+                    </p>
+                  </div>
+                  <p className="font-black">{formatINR(Number(t.fare))}</p>
+                </li>
+              ))}
+            </ul>
+          </Card>
         </section>
       )}
     </div>
@@ -314,13 +410,15 @@ function RequestCard({
   onAccept: () => void;
   onDecline: () => void;
 }) {
-  const live = secondsLeft !== undefined;
+  const counting = secondsLeft !== undefined;
+  const urgent = counting && secondsLeft <= 8;
+
   return (
-    <Card className="overflow-hidden border-primary/40 shadow-soft">
-      {live && (
+    <Card className="animate-in fade-in slide-in-from-bottom-2 overflow-hidden border-primary/40 shadow-soft">
+      {counting && (
         <div className="h-1.5 bg-muted" aria-hidden>
           <div
-            className="h-full bg-primary transition-all duration-1000 ease-linear"
+            className={cn("h-full transition-all duration-1000 ease-linear", urgent ? "bg-destructive" : "bg-primary")}
             style={{ width: `${(secondsLeft / REQUEST_SECONDS) * 100}%` }}
           />
         </div>
@@ -343,9 +441,9 @@ function RequestCard({
         <p className="shrink-0 text-2xl font-black text-primary">{formatINR(Number(ride.fare))}</p>
       </CardHeader>
       <CardContent className="grid gap-3">
-        {live && (
-          <p className="flex items-center gap-1.5 text-sm font-semibold" aria-live="off">
-            <Timer className="size-4 text-primary" aria-hidden /> {secondsLeft}s left to accept
+        {counting && (
+          <p className={cn("flex items-center gap-1.5 text-sm font-semibold", urgent && "text-destructive")}>
+            <Timer className="size-4" aria-hidden /> {secondsLeft}s left to accept
           </p>
         )}
         <div className="grid grid-cols-[1fr_2fr] gap-2">

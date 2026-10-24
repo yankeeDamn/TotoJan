@@ -45,3 +45,13 @@ export const CORRIDOR_DISTANCE_KM = 6.5;
 
 /** Average moving speeds (km/h) used for the ETA shown to travelers. */
 export const AVG_SPEED_KMPH: Record<"toto" | "cab", number> = { toto: 18, cab: 28 };
+
+/** Suggestions for the pickup/drop fields. Free text is still allowed. */
+export const LANDMARKS = [
+  "Rampurhat Railway Station",
+  "Rampurhat Bus Stand",
+  "Tarapith Temple",
+  "Tarapith Bus Stand",
+  "Tarapith Mahashmashan",
+  "Dwarka River Ghat, Tarapith",
+];
